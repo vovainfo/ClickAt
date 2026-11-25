@@ -1,0 +1,61 @@
+name: Windows build and release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build x64 executables
+        shell: cmd
+        run: build.cmd
+
+      - name: Run self-tests and check release version
+        shell: pwsh
+        run: |
+          & .\build\ClickAtBenchmark.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = (Get-Item .\build\ClickAt.exe).VersionInfo.ProductVersion
+            if ($env:GITHUB_REF_NAME -cne "v$version") {
+              throw "Tag $env:GITHUB_REF_NAME does not match application version $version."
+            }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClickAt-Windows-x64
+          path: build/ClickAt.exe
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: build
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClickAt-Windows-x64
+          path: dist
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME dist/ClickAt.exe `
+            --repo $env:GITHUB_REPOSITORY --verify-tag `
+            --title "ClickAt $env:GITHUB_REF_NAME" --generate-notes
+          exit $LASTEXITCODE

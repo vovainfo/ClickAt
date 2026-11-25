@@ -1,4 +1,5 @@
 #include "scheduler.h"
+#include "resource.h"
 #include "version.h"
 
 #include <cerrno>
@@ -426,6 +427,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     WNDCLASSW wc{};
     wc.lpfnWndProc = App::windowProc;
     wc.hInstance = instance;
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_CLICKAT));
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
     wc.lpszClassName = L"ClickAtWindow";

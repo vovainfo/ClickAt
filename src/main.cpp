@@ -141,7 +141,7 @@ private:
             : L"1. Укажите время.\r\n2. Введите координаты X и Y. Горячая клавиша занята.\r\n3. Проверьте дату и нажмите «Запланировать».";
         add(L"STATIC", instructions, SS_NOPREFIX, 0, 20, 98, 432, 60);
         preview_ = add(L"STATIC", L"", SS_NOPREFIX, 0, 20, 163, 432, 36);
-        add(L"BUTTON", L"Переместить в точку", WS_TABSTOP, moveId, 20, 201, 432, 32);
+        add(L"BUTTON", L"Переместить в точку (для проверки)", WS_TABSTOP, moveId, 20, 201, 432, 32);
         schedule_ = add(L"BUTTON", L"Запланировать", WS_TABSTOP | BS_DEFPUSHBUTTON,
                         scheduleId, 20, 241, 206, 32);
         cancel_ = add(L"BUTTON", L"Отменить", WS_TABSTOP, cancelId, 246, 241, 206, 32);

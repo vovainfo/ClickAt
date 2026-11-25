@@ -2,7 +2,6 @@
 #include "version.h"
 
 #include <cerrno>
-#include <climits>
 #include <commctrl.h>
 #include <cwchar>
 #include <exception>
@@ -16,12 +15,13 @@ namespace {
 using namespace clickat;
 
 constexpr int timeId = 101, xId = 102, yId = 103;
-constexpr int scheduleId = 105, cancelId = 106, hotkeyId = 108, githubId = 109;
+constexpr int scheduleId = 105, cancelId = 106, moveId = 107, hotkeyId = 108, githubId = 109;
 constexpr UINT completedMessage = WM_APP + 1;
-constexpr int clientWidth = 472, clientHeight = 318;
+constexpr int clientWidth = 472, clientHeight = 358;
 constexpr DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 constexpr wchar_t settingsKey[] = L"Software\\ClickAt";
 constexpr wchar_t savedTimeName[] = L"Time";
+constexpr wchar_t savedPointName[] = L"Point";
 constexpr wchar_t repositoryUrl[] = L"https://github.com/vovainfo/ClickAt";
 
 struct Control {
@@ -35,14 +35,13 @@ std::wstring textOf(HWND window) {
     return text;
 }
 
-bool parseInteger(HWND edit, int low, int high, int& value) {
+bool parseCoordinate(HWND edit, LONG& value) {
     const auto text = textOf(edit);
     wchar_t* end = nullptr;
     errno = 0;
-    const long parsed = wcstol(text.c_str(), &end, 10);
-    if (text.empty() || end == text.c_str() || *end || errno == ERANGE
-        || parsed < low || parsed > high) return false;
-    value = static_cast<int>(parsed);
+    const LONG parsed = wcstol(text.c_str(), &end, 10);
+    if (end == text.c_str() || *end || errno == ERANGE) return false;
+    value = parsed;
     return true;
 }
 
@@ -141,22 +140,29 @@ private:
             ? L"1. Укажите время.\r\n2. Наведите курсор на цель и нажмите Ctrl+Shift+F8.\r\n3. Проверьте дату и нажмите «Запланировать»."
             : L"1. Укажите время.\r\n2. Введите координаты X и Y. Горячая клавиша занята.\r\n3. Проверьте дату и нажмите «Запланировать».";
         add(L"STATIC", instructions, SS_NOPREFIX, 0, 20, 98, 432, 60);
-        preview_ = add(L"STATIC", L"", SS_NOPREFIX, 0, 20, 163, 432, 40);
+        preview_ = add(L"STATIC", L"", SS_NOPREFIX, 0, 20, 163, 432, 36);
+        add(L"BUTTON", L"Переместить в точку", WS_TABSTOP, moveId, 20, 201, 432, 32);
         schedule_ = add(L"BUTTON", L"Запланировать", WS_TABSTOP | BS_DEFPUSHBUTTON,
-                        scheduleId, 20, 201, 206, 32);
-        cancel_ = add(L"BUTTON", L"Отменить", WS_TABSTOP, cancelId, 246, 201, 206, 32);
-        status_ = add(L"STATIC", L"", SS_NOPREFIX, 0, 20, 241, 432, 33);
+                        scheduleId, 20, 241, 206, 32);
+        cancel_ = add(L"BUTTON", L"Отменить", WS_TABSTOP, cancelId, 246, 241, 206, 32);
+        status_ = add(L"STATIC", L"", SS_NOPREFIX, 0, 20, 281, 432, 33);
         add(L"STATIC", L"© Владимир Гуменников  ·  Версия " CLICKAT_VERSION_TEXT,
-            SS_NOPREFIX, 0, 20, 275, 432, 19);
+            SS_NOPREFIX, 0, 20, 315, 432, 19);
         const auto link = std::wstring(L"<a href=\"") + repositoryUrl + L"\">" + repositoryUrl + L"</a>";
-        add(WC_LINK, link.c_str(), WS_TABSTOP, githubId, 20, 294, 432, 20);
+        add(WC_LINK, link.c_str(), WS_TABSTOP, githubId, 20, 334, 432, 20);
         for (int i = 0; i < controlCount_; ++i) if (!controls_[i].window) return false;
         SendMessageW(time_, EM_SETLIMITTEXT, 8, 0);
         SendMessageW(x_, EM_SETLIMITTEXT, 11, 0);
         SendMessageW(y_, EM_SETLIMITTEXT, 11, 0);
         sessionRegistered_ = WTSRegisterSessionNotification(window_, NOTIFY_FOR_THIS_SESSION) != FALSE;
         SetWindowTextW(time_, loadTime().c_str());
-        timeEditReady_ = true;
+        POINT point{};
+        DWORD pointSize = sizeof(point);
+        if (RegGetValueW(HKEY_CURRENT_USER, settingsKey, savedPointName, RRF_RT_REG_BINARY,
+                         nullptr, &point, &pointSize) == ERROR_SUCCESS && pointSize == sizeof(point)) {
+            setPointFields(point);
+        }
+        settingsReady_ = true;
         resize(GetDpiForWindow(window_));
         refreshPreview();
         SetFocus(time_);
@@ -210,27 +216,60 @@ private:
         EnableWindow(cancel_, waiting);
     }
 
+    void setPointFields(const POINT& point) {
+        const bool ready = settingsReady_;
+        settingsReady_ = false;
+        SetWindowTextW(x_, std::to_wstring(point.x).c_str());
+        SetWindowTextW(y_, std::to_wstring(point.y).c_str());
+        settingsReady_ = ready;
+    }
+
+    bool readPoint(POINT& point) const {
+        return parseCoordinate(x_, point.x) && parseCoordinate(y_, point.y);
+    }
+
+    bool savePoint(const POINT& point) {
+        if (RegSetKeyValueW(HKEY_CURRENT_USER, settingsKey, savedPointName, REG_BINARY,
+                            &point, sizeof(point)) == ERROR_SUCCESS) return true;
+        SetWindowTextW(status_, L"Не удалось сохранить координаты.");
+        return false;
+    }
+
+    bool validatePoint(POINT& point) {
+        if (!readPoint(point)) {
+            SetWindowTextW(status_, L"Введите X и Y или выберите точку горячей клавишей.");
+            return false;
+        }
+        if (!MonitorFromPoint(point, MONITOR_DEFAULTTONULL)) {
+            SetWindowTextW(status_, L"Точка находится за пределами подключённых экранов.");
+            return false;
+        }
+        return true;
+    }
+
     void capturePoint() {
         POINT point{};
         if (scheduler_ || !GetCursorPos(&point)) return;
-        SetWindowTextW(x_, std::to_wstring(point.x).c_str());
-        SetWindowTextW(y_, std::to_wstring(point.y).c_str());
-        SetWindowTextW(status_, L"Точка сохранена.");
+        setPointFields(point);
+        if (savePoint(point)) SetWindowTextW(status_, L"Точка сохранена.");
+    }
+
+    void moveToPoint() {
+        POINT point{}, actual{};
+        if (!validatePoint(point)) return;
+        if (!SetCursorPos(point.x, point.y) || !GetCursorPos(&actual)
+            || actual.x != point.x || actual.y != point.y) {
+            SetWindowTextW(status_, L"Не удалось переместить курсор в указанную точку.");
+            return;
+        }
+        SetWindowTextW(status_, scheduler_ ? L"Курсор перемещён. Задание активно."
+                                          : L"Курсор перемещён.");
     }
 
     void schedule() {
         if (scheduler_ || !target_) return;
         Job job{};
-        int x = 0, y = 0;
-        if (!parseInteger(x_, INT_MIN, INT_MAX, x) || !parseInteger(y_, INT_MIN, INT_MAX, y)) {
-            SetWindowTextW(status_, L"Введите X и Y или выберите точку горячей клавишей.");
-            return;
-        }
-        job.point = {x, y};
-        if (!MonitorFromPoint(job.point, MONITOR_DEFAULTTONULL)) {
-            SetWindowTextW(status_, L"Точка находится за пределами подключённых экранов.");
-            return;
-        }
+        if (!validatePoint(job.point)) return;
         if (target_ <= utcNow()) {
             refreshPreview();
             SetWindowTextW(status_, L"Время истекло. Проверьте новую дату и подтвердите её.");
@@ -295,7 +334,7 @@ private:
             return 0;
         }
         case WM_COMMAND:
-            if (LOWORD(wp) == timeId && HIWORD(wp) == EN_CHANGE && timeEditReady_ && !scheduler_) {
+            if (LOWORD(wp) == timeId && HIWORD(wp) == EN_CHANGE && settingsReady_ && !scheduler_) {
                 refreshPreview();
                 const auto value = textOf(time_);
                 SYSTEMTIME parsed{};
@@ -305,6 +344,12 @@ private:
                     SetWindowTextW(status_, L"Не удалось сохранить время.");
                 }
             }
+            if ((LOWORD(wp) == xId || LOWORD(wp) == yId) && HIWORD(wp) == EN_CHANGE
+                && settingsReady_ && !scheduler_) {
+                POINT point{};
+                if (readPoint(point)) savePoint(point);
+            }
+            if (LOWORD(wp) == moveId) moveToPoint();
             if (LOWORD(wp) == scheduleId) schedule();
             if (LOWORD(wp) == cancelId && scheduler_) scheduler_->cancel();
             return 0;
@@ -367,7 +412,7 @@ private:
     int controlCount_ = 0;
     Tick target_ = 0;
     bool hotkeyRegistered_ = false, sessionRegistered_ = false;
-    bool locked_ = false, suspended_ = false, timeEditReady_ = false;
+    bool locked_ = false, suspended_ = false, settingsReady_ = false;
     std::unique_ptr<Scheduler> scheduler_;
     std::thread worker_;
     Result result_{Outcome::error};

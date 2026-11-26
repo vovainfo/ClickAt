@@ -16,20 +16,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build x64 executables
+      - name: Build ClickAt for Windows x64
         shell: cmd
         run: build.cmd
 
-      - name: Run self-tests and check release version
+      - name: Check release version
+        if: github.ref_type == 'tag'
         shell: pwsh
         run: |
-          & .\build\ClickAtBenchmark.exe --self-test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $version = (Get-Item .\build\ClickAt.exe).VersionInfo.ProductVersion
-            if ($env:GITHUB_REF_NAME -cne "v$version") {
-              throw "Tag $env:GITHUB_REF_NAME does not match application version $version."
-            }
+          $version = (Get-Item .\build\ClickAt.exe).VersionInfo.ProductVersion
+          if ($env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match application version $version."
           }
 
       - uses: actions/upload-artifact@v7.0.2

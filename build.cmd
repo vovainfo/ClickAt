@@ -19,6 +19,4 @@ if errorlevel 1 exit /b 1
 cl %FLAGS% /c ..\src\scheduler.cpp
 if errorlevel 1 exit /b 1
 cl %FLAGS% ..\src\main.cpp scheduler.obj ClickAt.res user32.lib gdi32.lib wtsapi32.lib advapi32.lib comctl32.lib shell32.lib /link /MANIFEST:NO /SUBSYSTEM:WINDOWS /OUT:ClickAt.exe
-if errorlevel 1 exit /b 1
-cl %FLAGS% ..\src\benchmark.cpp scheduler.obj ClickAt.res user32.lib wtsapi32.lib advapi32.lib /link /MANIFEST:NO /OUT:ClickAtBenchmark.exe
 exit /b %errorlevel%

@@ -19,8 +19,6 @@ struct Handle {
 };
 
 Tick utcNow();
-Tick counterNow();
-Tick counterFrequency();
 Tick asTicks(FILETIME time);
 SYSTEMTIME asSystemTime(Tick time);
 double milliseconds(Tick ticks);
@@ -28,30 +26,21 @@ double milliseconds(Tick ticks);
 enum class LocalTimeKind { unique, ambiguous, nonexistent, error };
 LocalTimeKind localToUtc(SYSTEMTIME local, DYNAMIC_TIME_ZONE_INFORMATION zone, Tick& result);
 
-struct ClockSample {
-    Tick utc = 0;
-    Tick counter = 0;
-};
-
 struct Job {
     Tick target = 0;
     POINT point{};
-    ULONG_PTR cookie = 0;
-    HWND expectedWindow = nullptr;
 };
 
 enum class Outcome {
-    sent, cancelled, invalidPoint, targetChanged, partial, error
+    sent, cancelled, invalidPoint, partial, error
 };
 
 struct Result {
     Outcome outcome;
-    ClockSample dispatch{};
+    Tick dispatchedAt = 0;
     UINT inserted = 0;
     DWORD error = 0;
 };
-
-const char* outcomeName(Outcome outcome);
 
 class Scheduler {
 public:

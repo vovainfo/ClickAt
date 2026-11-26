@@ -11,6 +11,18 @@ namespace {
 constexpr Tick prepareLead = 12 * ticksPerMs;
 constexpr Tick spinLead = 2 * ticksPerMs;
 
+Tick counterNow() {
+    LARGE_INTEGER value{};
+    QueryPerformanceCounter(&value);
+    return value.QuadPart;
+}
+
+Tick counterFrequency() {
+    LARGE_INTEGER value{};
+    QueryPerformanceFrequency(&value);
+    return value.QuadPart;
+}
+
 bool interactiveDesktop() {
     auto input = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
     if (!input) return false;
@@ -54,7 +66,6 @@ bool prepareInput(const Job& job, INPUT (&inputs)[3]) {
     inputs[2].mi.dwFlags = MOUSEEVENTF_LEFTUP;
     for (auto& input : inputs) {
         input.type = INPUT_MOUSE;
-        input.mi.dwExtraInfo = job.cookie;
     }
     return true;
 }
@@ -97,18 +108,6 @@ SYSTEMTIME asSystemTime(Tick time) {
     return result;
 }
 
-Tick counterNow() {
-    LARGE_INTEGER value{};
-    QueryPerformanceCounter(&value);
-    return value.QuadPart;
-}
-
-Tick counterFrequency() {
-    LARGE_INTEGER value{};
-    QueryPerformanceFrequency(&value);
-    return value.QuadPart;
-}
-
 double milliseconds(Tick ticks) {
     return static_cast<double>(ticks) / ticksPerMs;
 }
@@ -138,17 +137,6 @@ LocalTimeKind localToUtc(SYSTEMTIME local, DYNAMIC_TIME_ZONE_INFORMATION zone, T
     }
     if (matches == 1) return LocalTimeKind::unique;
     return matches == 0 ? LocalTimeKind::nonexistent : LocalTimeKind::ambiguous;
-}
-
-const char* outcomeName(Outcome outcome) {
-    switch (outcome) {
-    case Outcome::sent: return "sent";
-    case Outcome::cancelled: return "cancelled";
-    case Outcome::invalidPoint: return "invalid_point";
-    case Outcome::targetChanged: return "target_changed";
-    case Outcome::partial: return "input_failed";
-    default: return "error";
-    }
 }
 
 bool Scheduler::cancel() {
@@ -220,7 +208,7 @@ Result Scheduler::run(const Job& job) {
         }
         if (!prepared && now >= job.target - prepareLead) {
             if (!prepareInput(job, inputs)) {
-                return finish({Outcome::invalidPoint, {utcNow(), counterNow()}});
+                return finish({Outcome::invalidPoint});
             }
             prepared = true;
         }
@@ -244,24 +232,22 @@ Result Scheduler::run(const Job& job) {
         const Tick spinEnd = counterNow() + spinBudget;
         while (utcNow() < job.target && counterNow() < spinEnd) _mm_pause();
 
-        const bool expectedWindow = !job.expectedWindow || WindowFromPoint(job.point) == job.expectedWindow;
         std::lock_guard<std::mutex> lock(mutex_);
-        const ClockSample dispatch{utcNow(), counterNow()};
+        const Tick dispatchedAt = utcNow();
         if (cancelled_) {
             finished_ = true;
             return {Outcome::cancelled};
         }
-        if (dispatch.utc < job.target || locked_ || suspended_) {
+        if (dispatchedAt < job.target || locked_ || suspended_) {
             prepared = false;
             continue;
         }
         finished_ = true;
-        if (!expectedWindow) return {Outcome::targetChanged, dispatch};
         SetLastError(ERROR_SUCCESS);
         const UINT inserted = SendInput(3, inputs, sizeof(INPUT));
         const DWORD error = GetLastError();
         if (inserted == 2) SendInput(1, &inputs[2], sizeof(INPUT));
-        return {inserted == 3 ? Outcome::sent : Outcome::partial, dispatch, inserted, error};
+        return {inserted == 3 ? Outcome::sent : Outcome::partial, dispatchedAt, inserted, error};
     }
 }
 
